@@ -1,369 +1,86 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>P2P カード対戦（Firebase シグナリング）</title>
-<style>
-  body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP";background:#07102a;color:#eaf0ff;padding:18px;}
-  .box{max-width:980px;margin:0 auto;background:#0f1630;padding:12px;border-radius:12px;}
-  .row{display:flex;gap:8px;align-items:center;margin:8px 0;}
-  textarea{width:100%;height:80px;background:#06102a;color:#cfe;padding:8px;border-radius:8px;border:1px solid #233;}
-  button{padding:8px 10px;border-radius:8px;border:0;background:#1b2a6b;color:#fff;cursor:pointer;}
-  .small{font-size:13px;color:#9fb;margin-top:6px;}
-  .status{font-weight:700;color:#bfe;}
-</style>
+  <meta charset="UTF-8" />
+  <title>シンプル対戦カードゲーム</title>
+  <style>
+    body { font-family: sans-serif; text-align:center; background:#222; color:#fff; }
+    #game { margin-top:20px; }
+    button { padding:10px 20px; margin:5px; font-size:16px; }
+    input { padding:5px; }
+    .hand { margin:20px; }
+  </style>
 </head>
 <body>
-  <div class="box">
-    <h2>P2P カード対戦 — 自動接続 (Firebase シグナリング)</h2>
-    <div class="small">手順: 「ルーム作成」を押して出てくるURLを友達に送るだけ。友達が開けば自動接続します。</div>
+  <h1>カードバトル（P2P対戦）</h1>
 
-    <div class="row">
-      <button id="createRoom">ルーム作成</button>
-      <input id="roomId" placeholder="またはルームIDを入力して参加" style="flex:1;padding:8px;border-radius:8px;background:#06102a;border:1px solid #233;color:#cfe" />
-      <button id="joinRoom">参加</button>
-    </div>
-
-    <div class="row">
-      <div>接続状態: <span id="status" class="status">未接続</span></div>
-      <div style="margin-left:auto">あなた: <span id="myRole">—</span></div>
-    </div>
-
-    <hr/>
-
-    <div class="row">
-      <div style="flex:1">
-        <div class="small">ゲームログ</div>
-        <div id="log" style="height:160px;overflow:auto;background:#06102a;padding:8px;border-radius:8px;color:#bfe"></div>
-      </div>
-      <div style="width:260px" class="small">
-        <div>操作</div>
-        <button id="startGame">ゲーム開始（接続後）</button>
-        <button id="reset">ローカルリセット</button>
-      </div>
-    </div>
-
-    <hr/>
-    <!-- 簡単なゲーム UI -->
-    <div class="row">
-      <div style="flex:1">
-        <div class="small">あなた HP: <span id="myHp">20</span> デッキ: <span id="myDeck">10</span></div>
-        <div id="myHand" style="display:flex;gap:8px;margin-top:8px"></div>
-      </div>
-      <div style="flex:1">
-        <div class="small">相手 HP: <span id="opHp">20</span> デッキ: <span id="opDeck">10</span></div>
-        <div id="opVisible" style="display:flex;gap:8px;margin-top:8px"></div>
-      </div>
-    </div>
-
-    <div class="small" style="margin-top:10px;color:#9fb">
-      <strong>注意:</strong> 下の <code>firebaseConfig</code> をあなたのプロジェクトの設定に置き換えてください。
-    </div>
+  <div>
+    あなたのID: <span id="my-id">接続中...</span><br>
+    友達のID: <input id="peer-id" /> 
+    <button onclick="connectPeer()">接続</button>
   </div>
 
-<script type="module">
-/*
-  Firebase Realtime DB を使った自動シグナリングサンプル
-  - ルームのパス: /rooms/{roomId}/
-    - offer  { sdp, ts }
-    - answer { sdp, ts }
-    - offerCandidates/answerCandidates に ICE candidate を push
-  - ルーム作成者 = A（offerer）、参加者 = B（answerer）
-*/
+  <div id="game">
+    <div class="hand">
+      <button onclick="playCard('攻撃')">攻撃</button>
+      <button onclick="playCard('防御')">防御</button>
+      <button onclick="playCard('回復')">回復</button>
+    </div>
+    <p id="log"></p>
+  </div>
 
-// ======= Firebase 初期化（ここを自分の設定に置き換える） =======
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js';
-import {
-  getDatabase, ref, set, push, onValue, remove, child, get, query, orderByKey, limitToLast
-} from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js';
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script>
+    let peer = new Peer(); // 公開PeerJSサーバーを利用
+    let conn;
+    let hp = 10, enemyHp = 10;
 
-// --- ここを置き換えてください ---
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "PROJECT_ID",
-  appId: "APP_ID"
-};
-// ============================================================
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+    peer.on('open', id => {
+      document.getElementById('my-id').textContent = id;
+    });
 
-// ======= WebRTC 設定 =======
-const cfg = { iceServers: [{ urls:'stun:stun.l.google.com:19302' }] };
-let pc = null, dc = null;
-let roomRef = null;
-let myRole = null; // 'A' or 'B'
-let roomIdCurrent = null;
+    peer.on('connection', c => {
+      conn = c;
+      setupConnection();
+    });
 
-const statusEl = document.getElementById('status');
-const logEl = document.getElementById('log');
-const roomInput = document.getElementById('roomId');
-const myRoleEl = document.getElementById('myRole');
-
-function log(msg){
-  logEl.innerHTML = `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>` + logEl.innerHTML;
-}
-function setStatus(s){ statusEl.textContent = s; }
-
-function other(role){ return role === 'A' ? 'B' : 'A'; }
-
-// Peer 作成
-function createPeer(){
-  pc = new RTCPeerConnection(cfg);
-  pc.onicecandidate = e => {
-    if(!e.candidate) return;
-    if(!roomRef) return;
-    const path = `rooms/${roomIdCurrent}/${ myRole === 'A' ? 'offerCandidates' : 'answerCandidates' }`;
-    push(ref(db, path), e.candidate.toJSON());
-  };
-  pc.onconnectionstatechange = () => {
-    setStatus(pc.connectionState);
-    log('PC state: ' + pc.connectionState);
-  };
-  pc.ondatachannel = ev => {
-    dc = ev.channel;
-    setupDataChannel();
-  };
-  return pc;
-}
-
-function setupDataChannel(){
-  if(!dc) return;
-  dc.onopen = ()=> log('DataChannel open');
-  dc.onclose = ()=> log('DataChannel closed');
-  dc.onmessage = ev => handleMessage(ev.data);
-}
-
-// メッセージ処理（ゲーム同期に使う）
-let gameState = null;
-function handleMessage(txt){
-  try{
-    const obj = JSON.parse(txt);
-    if(obj.type==='log'){ log('remote: ' + obj.msg); return; }
-    if(obj.type==='game-state'){ gameState = obj.state; updateUI(); log('game-state 受信'); return; }
-    if(obj.type==='action'){ applyAction(obj.action, false); return; }
-  }catch(e){ console.error(e); }
-}
-
-// send JSON
-function send(obj){
-  if(dc && dc.readyState === 'open') dc.send(JSON.stringify(obj));
-}
-
-// ルーム作成（ホスト:A）
-document.getElementById('createRoom').onclick = async () => {
-  // generate short roomId
-  const rid = Math.random().toString(36).slice(2,9);
-  roomInput.value = rid;
-  await setupRoomAsA(rid);
-  // update URL so user can share
-  const url = new URL(location.href);
-  url.hash = rid;
-  navigator.clipboard && navigator.clipboard.writeText(url.toString()).then(()=> log('共有URLをクリップボードにコピーしました'));
-};
-
-// 参加（B）
-document.getElementById('joinRoom').onclick = async () => {
-  const rid = roomInput.value.trim() || location.hash.slice(1);
-  if(!rid) return alert('ルームIDを入力またはURLハッシュで指定してください');
-  await joinRoomAsB(rid);
-};
-
-// ルームクリーンアップ (簡易)
-async function cleanupRoom(rid){
-  try{ await remove(ref(db, 'rooms/' + rid)); log('ルーム削除: ' + rid); }catch(e){/* ignore */ }
-}
-
-// ========== A: Offerer の処理 ==========
-async function setupRoomAsA(rid){
-  roomIdCurrent = rid;
-  myRole = 'A';
-  myRoleEl.textContent = 'ホスト (A)';
-  createPeer();
-  // create data channel
-  dc = pc.createDataChannel('game');
-  setupDataChannel();
-
-  // create offer
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  // write offer to DB
-  const roomPath = `rooms/${rid}/offer`;
-  await set(ref(db, roomPath), { sdp: pc.localDescription.sdp, type: pc.localDescription.type, ts: Date.now() });
-  roomRef = ref(db, 'rooms/' + rid);
-  log('ルーム作成: ' + rid + '（Offer を DB に公開）');
-  setStatus('待機: 参加者を待っています');
-
-  // watch for answer
-  onValue(child(roomRef,'answer'), async snap => {
-    const val = snap.val();
-    if(val && !pc.currentRemoteDescription){
-      const desc = { type: val.type, sdp: val.sdp };
-      await pc.setRemoteDescription(desc);
-      log('Answer を取得して接続を開始');
+    function connectPeer(){
+      const id = document.getElementById('peer-id').value;
+      conn = peer.connect(id);
+      setupConnection();
     }
-  });
 
-  // watch for remote ICE candidates (answerer が push する)
-  onValue(child(roomRef, 'answerCandidates'), snap => {
-    const val = snap.val();
-    if(!val) return;
-    Object.values(val).forEach(async c => {
-      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
-    });
-  });
+    function setupConnection(){
+      conn.on('open', () => log("接続しました！"));
+      conn.on('data', data => handleMessage(data));
+    }
 
-  // also listen own offerCandidates? not needed for A
-  roomIdCurrent = rid;
-  // add local candidates will be pushed automatically by onicecandidate
-}
+    function playCard(card){
+      if(!conn) return alert("まだ接続していません！");
+      log("あなたは「"+card+"」を出した！");
+      resolve(card, "me");
+      conn.send({card:card});
+    }
 
-// ========== B: Answerer の処理 ==========
-async function joinRoomAsB(rid){
-  roomIdCurrent = rid;
-  myRole = 'B';
-  myRoleEl.textContent = '参加者 (B)';
-  const roomSnapshot = await get(ref(db, 'rooms/' + rid));
-  if(!roomSnapshot.exists()) return alert('そのルームは存在しません');
-  const roomObj = roomSnapshot.val();
-  // read offer
-  if(!roomObj.offer) return alert('Offer がまだありません');
-  createPeer();
+    function handleMessage(data){
+      log("相手は「"+data.card+"」を出した！");
+      resolve(data.card, "enemy");
+    }
 
-  // set remote offer
-  await pc.setRemoteDescription({ type: roomObj.offer.type, sdp: roomObj.offer.sdp });
+    function resolve(card, who){
+      if(who==="me"){
+        if(card==="攻撃") enemyHp--;
+        if(card==="回復") hp++;
+      }else{
+        if(card==="攻撃") hp--;
+        if(card==="回復") enemyHp++;
+      }
+      log(`HP: あなた=${hp}, 相手=${enemyHp}`);
+    }
 
-  // create answer
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  // write answer to DB
-  await set(ref(db, `rooms/${rid}/answer`), { type: pc.localDescription.type, sdp: pc.localDescription.sdp, ts: Date.now() });
-  roomRef = ref(db, 'rooms/' + rid);
-  log('Offer を読み、Answer を DB に書き込みました');
-
-  // watch for offerCandidates
-  onValue(child(roomRef, 'offerCandidates'), snap => {
-    const val = snap.val();
-    if(!val) return;
-    Object.values(val).forEach(async c => {
-      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
-    });
-  });
-
-  // watch for answerCandidates (we will push ours from onicecandidate)
-  onValue(child(roomRef, 'answerCandidates'), snap => {
-    const val = snap.val();
-    if(!val) return;
-    Object.values(val).forEach(async c => {
-      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
-    });
-  });
-
-  // Also, if offer later changes, ignore (simple implementation)
-}
-
-// ===== DataChannel を通じた簡易ゲーム同期（前回と同じルール） =====
-function initGameState(){
-  return {
-    players: { A:{hp:20,deck:[],hand:[]}, B:{hp:20,deck:[],hand:[]} },
-    turn:'A', started:false
-  };
-}
-function rngDeck(){ const arr=[]; for(let i=0;i<10;i++) arr.push({type:'atk',v: rint(1,6)}); return arr.sort(()=>Math.random()-0.5); }
-let localId = null; // set when starting game: A or B
-
-function applyAction(action, local=true){
-  // action: {act:'new-game'|'play'|'end'|'draw'|'giveup', player: 'A'|'B', payload: {}}
-  if(action.act==='new-game'){
-    gameState = initGameState();
-    gameState.players.A.deck = rngDeck();
-    gameState.players.B.deck = rngDeck();
-    gameState.players.A.hand = gameState.players.A.deck.splice(0,3);
-    gameState.players.B.hand = gameState.players.B.deck.splice(0,3);
-    gameState.started=true;
-    log('ゲーム開始');
-    updateUI();
-  } else if(action.act==='play'){
-    const p = action.player, opponent = other(p);
-    const idx = action.payload.idx;
-    const card = gameState.players[p].hand.splice(idx,1)[0];
-    gameState.players[opponent].hp -= (card.type==='atk'? card.v:0);
-    if(gameState.players[opponent].hp < 0) gameState.players[opponent].hp = 0;
-    log(`${p} played ${card.type}${card.v?(' '+card.v):''}`);
-    updateUI();
-  } else if(action.act==='end'){
-    gameState.turn = other(gameState.turn);
-    // draw
-    const pl = gameState.players[gameState.turn];
-    if(pl.deck.length) pl.hand.push(pl.deck.shift());
-    updateUI();
-    log('ターン交代: ' + gameState.turn);
-  }
-  if(local) send({type:'action', action});
-}
-
-function updateUI(){
-  if(!gameState) return;
-  document.getElementById('myHp').textContent = gameState.players[localId].hp;
-  document.getElementById('opHp').textContent = gameState.players[other(localId)].hp;
-  document.getElementById('myDeck').textContent = gameState.players[localId].deck.length;
-  document.getElementById('opDeck').textContent = gameState.players[other(localId)].deck.length;
-  // render hands
-  const myHandDiv = document.getElementById('myHand'); myHandDiv.innerHTML='';
-  gameState.players[localId].hand.forEach((c,i)=>{
-    const b = document.createElement('button'); b.textContent = (c.type==='atk'?'ATK '+c.v:c.type);
-    b.onclick = ()=> applyAction({act:'play', player: localId, payload:{idx:i}}, true);
-    myHandDiv.appendChild(b);
-  });
-  const opDiv = document.getElementById('opVisible'); opDiv.innerHTML='';
-  // show nothing or last played card — here we show nothing for simplicity
-}
-
-// ユーティリティ
-function rint(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
-
-// ゲーム開始ボタン（接続時に使用）
-document.getElementById('startGame').onclick = ()=>{
-  if(!dc || dc.readyState!=='open') return alert('まず接続してください');
-  // decide roles: A is room creator (Offerer)
-  localId = (myRole === 'A') ? 'A' : 'B';
-  applyAction({act:'new-game', player: localId, payload:{}}, true);
-};
-
-// ローカルリセット
-document.getElementById('reset').onclick = async ()=>{
-  try{ if(pc) pc.close(); }catch(e){}
-  pc = null; dc = null; roomRef = null; gameState = null; localId = null; myRole = null; roomIdCurrent = null;
-  roomInput.value = '';
-  setStatus('未接続'); myRoleEl.textContent = '—'; log('ローカルリセットしました');
-};
-
-// Helper: when DataChannel open, set up handler to receive actions
-function setupDataChannel(){
-  if(!dc) return;
-  dc.onopen = ()=> {
-    log('DataChannel open');
-    setStatus('接続済み');
-    // When connected, if you are B and game was started earlier remotely, remote can send game-state
-  };
-  dc.onmessage = ev => {
-    handleMessage(ev.data);
-  };
-  dc.onclose = ()=> {
-    log('DataChannel closed'); setStatus('切断');
-  };
-}
-
-// Clean up DB entries when window closed (try)
-window.addEventListener('beforeunload', async () => {
-  if(roomIdCurrent && myRole==='A'){
-    try{ await remove(ref(db, 'rooms/' + roomIdCurrent)); }catch(e){/* ignore */ }
-  }
-});
-
-</script>
+    function log(msg){
+      document.getElementById('log').innerHTML += msg+"<br>";
+    }
+  </script>
 </body>
 </html>
