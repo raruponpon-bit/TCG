@@ -1,404 +1,368 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>P2P カード対戦（サンプル）</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>P2P カード対戦（Firebase シグナリング）</title>
 <style>
-  body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; background:#0b1220;color:#eef2ff;display:flex;flex-direction:column;align-items:center;padding:18px;}
-  .board{display:flex;gap:12px;max-width:1100px;width:100%;}
-  .panel{background:#0f1630;padding:12px;border-radius:12px;border:1px solid #223;flex:1;box-shadow:0 6px 18px rgba(0,0,0,.5);}
-  h1{margin:6px 0 12px;font-size:18px}
-  .controls textarea{width:100%;height:80px;background:#07102a;color:#cfe;text-align:left;padding:8px;border-radius:8px;border:1px solid #233;}
-  button{padding:8px 10px;border-radius:8px;border:0;background:#1b2a6b;color:#fff;cursor:pointer;margin:4px 0;}
-  .row{display:flex;gap:8px;align-items:center;}
-  .card{background:#eaf0ff;color:#0b1430;padding:8px;border-radius:8px;min-width:72px;text-align:center;font-weight:700;}
-  .hand{display:flex;gap:8px;flex-wrap:wrap;}
-  .log{height:160px;overflow:auto;background:#06102a;padding:8px;border-radius:8px;color:#bfe;}
-  .small{font-size:13px;color:#9fb;}
-  .status{font-weight:700;}
-  .center{display:flex;flex-direction:column;align-items:center;gap:8px;}
+  body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP";background:#07102a;color:#eaf0ff;padding:18px;}
+  .box{max-width:980px;margin:0 auto;background:#0f1630;padding:12px;border-radius:12px;}
+  .row{display:flex;gap:8px;align-items:center;margin:8px 0;}
+  textarea{width:100%;height:80px;background:#06102a;color:#cfe;padding:8px;border-radius:8px;border:1px solid #233;}
+  button{padding:8px 10px;border-radius:8px;border:0;background:#1b2a6b;color:#fff;cursor:pointer;}
+  .small{font-size:13px;color:#9fb;margin-top:6px;}
+  .status{font-weight:700;color:#bfe;}
 </style>
 </head>
 <body>
-  <h1>P2P カード対戦（サンプル） — コピー＆ペーストで接続</h1>
-  <div class="board">
-    <div class="panel" style="flex:0.9">
-      <div class="row">
-        <div style="flex:1">
-          <div class="small">あなたの名前</div>
-          <input id="name" value="Player" style="width:100%;padding:8px;border-radius:8px;border:1px solid #233;background:#07102a;color:#cfe"/>
-        </div>
-        <div style="width:160px">
-          <div class="small">接続状態</div>
-          <div id="conn" class="status">未接続</div>
-        </div>
-      </div>
+  <div class="box">
+    <h2>P2P カード対戦 — 自動接続 (Firebase シグナリング)</h2>
+    <div class="small">手順: 「ルーム作成」を押して出てくるURLを友達に送るだけ。友達が開けば自動接続します。</div>
 
-      <hr/>
-      <div class="row" style="gap:12px;">
-        <div style="flex:1" class="controls">
-          <div class="small">役割: ホスト（作成） / ジョイン（参加）</div>
-          <div class="row">
-            <button id="makeOffer">① ホスト: Offer 作成</button>
-            <button id="acceptOffer">② ジョイン: Offer を受け取って Answer 作成</button>
-            <button id="pasteAnswer">③ ホスト: 相手の Answer を貼る</button>
-          </div>
-          <div class="small">Offer / Answer（コピーして相手に渡す）</div>
-          <textarea id="sdpBox" placeholder="ここにOfferまたはAnswerを貼る/取り出す"></textarea>
-          <div class="small">接続が確立すると「接続状態」が変わります。Offer/Answerは長いテキストを丸ごとコピーしてください。</div>
-        </div>
-        <div style="width:300px" class="center panel">
-          <div class="small">ゲームログ</div>
-          <div id="log" class="log"></div>
-          <div style="width:100%;margin-top:8px" class="row">
-            <button id="newGame">ゲーム開始（両者が接続後）</button>
-            <button id="reset">ローカルリセット</button>
-          </div>
-        </div>
-      </div>
+    <div class="row">
+      <button id="createRoom">ルーム作成</button>
+      <input id="roomId" placeholder="またはルームIDを入力して参加" style="flex:1;padding:8px;border-radius:8px;background:#06102a;border:1px solid #233;color:#cfe" />
+      <button id="joinRoom">参加</button>
+    </div>
 
-      <hr/>
-      <div class="row">
-        <div style="flex:1">
-          <div class="small">あなた (自分)</div>
-          <div class="row">
-            <div class="card">HP <span id="myHp">20</span></div>
-            <div class="card">Deck <span id="myDeck">10</span></div>
-            <div class="card">Hand <span id="myHandCount">0</span></div>
-          </div>
-          <div class="small">手札</div>
-          <div id="myHand" class="hand"></div>
-        </div>
+    <div class="row">
+      <div>接続状態: <span id="status" class="status">未接続</span></div>
+      <div style="margin-left:auto">あなた: <span id="myRole">—</span></div>
+    </div>
 
-        <div style="flex:1">
-          <div class="small">相手 (リモート)</div>
-          <div class="row">
-            <div class="card">HP <span id="opHp">20</span></div>
-            <div class="card">Deck <span id="opDeck">10</span></div>
-            <div class="card">Hand <span id="opHandCount">0</span></div>
-          </div>
-          <div class="small">相手の公開手札（相手が明示したカードのみ表示）</div>
-          <div id="opVisible" class="hand"></div>
-        </div>
-      </div>
+    <hr/>
 
-      <hr/>
-      <div class="row">
-        <div style="flex:1">
-          <div class="small">現在のターン: <span id="turnInfo">—</span></div>
-          <div class="small">操作</div>
-          <div class="row">
-            <button id="endTurn">ターン終了</button>
-            <button id="drawCard">ドロー（デバッグ）</button>
-            <button id="giveUp">ギブアップ</button>
-          </div>
-        </div>
+    <div class="row">
+      <div style="flex:1">
+        <div class="small">ゲームログ</div>
+        <div id="log" style="height:160px;overflow:auto;background:#06102a;padding:8px;border-radius:8px;color:#bfe"></div>
       </div>
+      <div style="width:260px" class="small">
+        <div>操作</div>
+        <button id="startGame">ゲーム開始（接続後）</button>
+        <button id="reset">ローカルリセット</button>
+      </div>
+    </div>
+
+    <hr/>
+    <!-- 簡単なゲーム UI -->
+    <div class="row">
+      <div style="flex:1">
+        <div class="small">あなた HP: <span id="myHp">20</span> デッキ: <span id="myDeck">10</span></div>
+        <div id="myHand" style="display:flex;gap:8px;margin-top:8px"></div>
+      </div>
+      <div style="flex:1">
+        <div class="small">相手 HP: <span id="opHp">20</span> デッキ: <span id="opDeck">10</span></div>
+        <div id="opVisible" style="display:flex;gap:8px;margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="small" style="margin-top:10px;color:#9fb">
+      <strong>注意:</strong> 下の <code>firebaseConfig</code> をあなたのプロジェクトの設定に置き換えてください。
     </div>
   </div>
 
-<script>
+<script type="module">
 /*
-  シンプル設計のP2Pゲーム (DataChannel)
-  - 手動シグナリング (SDPコピー&ペースト)
-  - メッセージはJSONで同期
-  - 最初に "new-game" を送って同じ初期状態で開始
-  - 以降 "action" メッセージで手番操作を伝播
+  Firebase Realtime DB を使った自動シグナリングサンプル
+  - ルームのパス: /rooms/{roomId}/
+    - offer  { sdp, ts }
+    - answer { sdp, ts }
+    - offerCandidates/answerCandidates に ICE candidate を push
+  - ルーム作成者 = A（offerer）、参加者 = B（answerer）
 */
 
-// ---------- WebRTC P2P シグナリング（手動） ----------
-let pc = null;
-let dc = null;
-let isOfferer = false;
+// ======= Firebase 初期化（ここを自分の設定に置き換える） =======
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js';
+import {
+  getDatabase, ref, set, push, onValue, remove, child, get, query, orderByKey, limitToLast
+} from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js';
+
+// --- ここを置き換えてください ---
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "PROJECT_ID.firebaseapp.com",
+  databaseURL: "https://PROJECT_ID-default-rtdb.firebaseio.com",
+  projectId: "PROJECT_ID",
+  appId: "APP_ID"
+};
+// ============================================================
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ======= WebRTC 設定 =======
+const cfg = { iceServers: [{ urls:'stun:stun.l.google.com:19302' }] };
+let pc = null, dc = null;
+let roomRef = null;
+let myRole = null; // 'A' or 'B'
+let roomIdCurrent = null;
+
+const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
-const sdpBox = document.getElementById('sdpBox');
-const connEl = document.getElementById('conn');
+const roomInput = document.getElementById('roomId');
+const myRoleEl = document.getElementById('myRole');
 
 function log(msg){
-  const time = new Date().toLocaleTimeString();
-  logEl.innerHTML = `<div>[${time}] ${msg}</div>` + logEl.innerHTML;
+  logEl.innerHTML = `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>` + logEl.innerHTML;
 }
-function setStatus(s){ connEl.textContent = s; }
+function setStatus(s){ statusEl.textContent = s; }
 
-const cfg = { iceServers: [{ urls:'stun:stun.l.google.com:19302' }] };
+function other(role){ return role === 'A' ? 'B' : 'A'; }
 
-function ensurePeer(){
-  if(pc) return pc;
+// Peer 作成
+function createPeer(){
   pc = new RTCPeerConnection(cfg);
-  pc.onicecandidate = (e)=> {
-    if(e.candidate === null) {
-      // 最終SDPができた
-      sdpBox.value = pc.localDescription.sdp;
-    }
+  pc.onicecandidate = e => {
+    if(!e.candidate) return;
+    if(!roomRef) return;
+    const path = `rooms/${roomIdCurrent}/${ myRole === 'A' ? 'offerCandidates' : 'answerCandidates' }`;
+    push(ref(db, path), e.candidate.toJSON());
   };
-  pc.ondatachannel = (ev)=> {
-    dc = ev.channel;
-    setupDataChannel(dc);
-  };
-  pc.onconnectionstatechange = ()=> {
+  pc.onconnectionstatechange = () => {
     setStatus(pc.connectionState);
     log('PC state: ' + pc.connectionState);
+  };
+  pc.ondatachannel = ev => {
+    dc = ev.channel;
+    setupDataChannel();
   };
   return pc;
 }
 
-function setupDataChannel(channel){
-  dc = channel;
-  dc.onopen = ()=> { log('DataChannel open'); setStatus('接続済み'); };
-  dc.onclose = ()=> { log('DataChannel closed'); setStatus('切断'); };
-  dc.onmessage = (ev)=> {
-    handleMessage(ev.data);
-  };
+function setupDataChannel(){
+  if(!dc) return;
+  dc.onopen = ()=> log('DataChannel open');
+  dc.onclose = ()=> log('DataChannel closed');
+  dc.onmessage = ev => handleMessage(ev.data);
 }
 
-// ① ホスト: Offer作成（OffererがDataChannelを作る）
-document.getElementById('makeOffer').onclick = async ()=>{
-  isOfferer = true;
-  const pc = ensurePeer();
+// メッセージ処理（ゲーム同期に使う）
+let gameState = null;
+function handleMessage(txt){
+  try{
+    const obj = JSON.parse(txt);
+    if(obj.type==='log'){ log('remote: ' + obj.msg); return; }
+    if(obj.type==='game-state'){ gameState = obj.state; updateUI(); log('game-state 受信'); return; }
+    if(obj.type==='action'){ applyAction(obj.action, false); return; }
+  }catch(e){ console.error(e); }
+}
+
+// send JSON
+function send(obj){
+  if(dc && dc.readyState === 'open') dc.send(JSON.stringify(obj));
+}
+
+// ルーム作成（ホスト:A）
+document.getElementById('createRoom').onclick = async () => {
+  // generate short roomId
+  const rid = Math.random().toString(36).slice(2,9);
+  roomInput.value = rid;
+  await setupRoomAsA(rid);
+  // update URL so user can share
+  const url = new URL(location.href);
+  url.hash = rid;
+  navigator.clipboard && navigator.clipboard.writeText(url.toString()).then(()=> log('共有URLをクリップボードにコピーしました'));
+};
+
+// 参加（B）
+document.getElementById('joinRoom').onclick = async () => {
+  const rid = roomInput.value.trim() || location.hash.slice(1);
+  if(!rid) return alert('ルームIDを入力またはURLハッシュで指定してください');
+  await joinRoomAsB(rid);
+};
+
+// ルームクリーンアップ (簡易)
+async function cleanupRoom(rid){
+  try{ await remove(ref(db, 'rooms/' + rid)); log('ルーム削除: ' + rid); }catch(e){/* ignore */ }
+}
+
+// ========== A: Offerer の処理 ==========
+async function setupRoomAsA(rid){
+  roomIdCurrent = rid;
+  myRole = 'A';
+  myRoleEl.textContent = 'ホスト (A)';
+  createPeer();
+  // create data channel
   dc = pc.createDataChannel('game');
-  setupDataChannel(dc);
+  setupDataChannel();
+
+  // create offer
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  // localDescription.sdp はICE収集終了で書き変わるが、簡易版としてここを表示
-  sdpBox.value = btoa(JSON.stringify({type:pc.localDescription.type, sdp:pc.localDescription.sdp}));
-  log('Offer 生成 -> コピーして相手に送ってください（base64 JSON）');
-};
 
-// ② ジョイン: Offerを貼ってAnswerを作成
-document.getElementById('acceptOffer').onclick = async ()=>{
-  try {
-    const raw = sdpBox.value.trim();
-    if(!raw) { alert('Offerを貼ってください'); return; }
-    const parsed = JSON.parse(atob(raw));
-    const pc = ensurePeer();
-    await pc.setRemoteDescription(parsed);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    // 返すAnswerをコピーしてホストに渡す
-    sdpBox.value = btoa(JSON.stringify({type:pc.localDescription.type, sdp:pc.localDescription.sdp}));
-    log('Answer を生成しました -> ホストに貼ってもらってください（base64 JSON）');
-  } catch(e){ console.error(e); alert('処理失敗: ' + e.message); }
-};
+  // write offer to DB
+  const roomPath = `rooms/${rid}/offer`;
+  await set(ref(db, roomPath), { sdp: pc.localDescription.sdp, type: pc.localDescription.type, ts: Date.now() });
+  roomRef = ref(db, 'rooms/' + rid);
+  log('ルーム作成: ' + rid + '（Offer を DB に公開）');
+  setStatus('待機: 参加者を待っています');
 
-// ③ ホスト: 相手の Answer を貼る（最後の手順）
-document.getElementById('pasteAnswer').onclick = async ()=>{
-  try {
-    const raw = sdpBox.value.trim();
-    if(!raw) { alert('Answerを貼ってください'); return; }
-    const parsed = JSON.parse(atob(raw));
-    const pc = ensurePeer();
-    await pc.setRemoteDescription(parsed);
-    log('Answerを設定しました。接続を待ってください。');
-  } catch(e){ console.error(e); alert('処理失敗: ' + e.message); }
-};
+  // watch for answer
+  onValue(child(roomRef,'answer'), async snap => {
+    const val = snap.val();
+    if(val && !pc.currentRemoteDescription){
+      const desc = { type: val.type, sdp: val.sdp };
+      await pc.setRemoteDescription(desc);
+      log('Answer を取得して接続を開始');
+    }
+  });
 
-// ---------- ゲームロジック（Stateはシンプルで双方で同じ状態を持つ） ----------
-let state = null; // game state
-let myId = null; // "A" or "B" — ホストがA（offerer）
-function buildEmptyState(){
+  // watch for remote ICE candidates (answerer が push する)
+  onValue(child(roomRef, 'answerCandidates'), snap => {
+    const val = snap.val();
+    if(!val) return;
+    Object.values(val).forEach(async c => {
+      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
+    });
+  });
+
+  // also listen own offerCandidates? not needed for A
+  roomIdCurrent = rid;
+  // add local candidates will be pushed automatically by onicecandidate
+}
+
+// ========== B: Answerer の処理 ==========
+async function joinRoomAsB(rid){
+  roomIdCurrent = rid;
+  myRole = 'B';
+  myRoleEl.textContent = '参加者 (B)';
+  const roomSnapshot = await get(ref(db, 'rooms/' + rid));
+  if(!roomSnapshot.exists()) return alert('そのルームは存在しません');
+  const roomObj = roomSnapshot.val();
+  // read offer
+  if(!roomObj.offer) return alert('Offer がまだありません');
+  createPeer();
+
+  // set remote offer
+  await pc.setRemoteDescription({ type: roomObj.offer.type, sdp: roomObj.offer.sdp });
+
+  // create answer
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  // write answer to DB
+  await set(ref(db, `rooms/${rid}/answer`), { type: pc.localDescription.type, sdp: pc.localDescription.sdp, ts: Date.now() });
+  roomRef = ref(db, 'rooms/' + rid);
+  log('Offer を読み、Answer を DB に書き込みました');
+
+  // watch for offerCandidates
+  onValue(child(roomRef, 'offerCandidates'), snap => {
+    const val = snap.val();
+    if(!val) return;
+    Object.values(val).forEach(async c => {
+      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
+    });
+  });
+
+  // watch for answerCandidates (we will push ours from onicecandidate)
+  onValue(child(roomRef, 'answerCandidates'), snap => {
+    const val = snap.val();
+    if(!val) return;
+    Object.values(val).forEach(async c => {
+      try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
+    });
+  });
+
+  // Also, if offer later changes, ignore (simple implementation)
+}
+
+// ===== DataChannel を通じた簡易ゲーム同期（前回と同じルール） =====
+function initGameState(){
   return {
-    players: {
-      A: { name: null, hp:20, deck:[], hand:[] , visible:[] },
-      B: { name: null, hp:20, deck:[], hand:[] , visible:[] }
-    },
-    turn: 'A', // A or B
-    started: false,
-    winner: null,
+    players: { A:{hp:20,deck:[],hand:[]}, B:{hp:20,deck:[],hand:[]} },
+    turn:'A', started:false
+  };
+}
+function rngDeck(){ const arr=[]; for(let i=0;i<10;i++) arr.push({type:'atk',v: rint(1,6)}); return arr.sort(()=>Math.random()-0.5); }
+let localId = null; // set when starting game: A or B
+
+function applyAction(action, local=true){
+  // action: {act:'new-game'|'play'|'end'|'draw'|'giveup', player: 'A'|'B', payload: {}}
+  if(action.act==='new-game'){
+    gameState = initGameState();
+    gameState.players.A.deck = rngDeck();
+    gameState.players.B.deck = rngDeck();
+    gameState.players.A.hand = gameState.players.A.deck.splice(0,3);
+    gameState.players.B.hand = gameState.players.B.deck.splice(0,3);
+    gameState.started=true;
+    log('ゲーム開始');
+    updateUI();
+  } else if(action.act==='play'){
+    const p = action.player, opponent = other(p);
+    const idx = action.payload.idx;
+    const card = gameState.players[p].hand.splice(idx,1)[0];
+    gameState.players[opponent].hp -= (card.type==='atk'? card.v:0);
+    if(gameState.players[opponent].hp < 0) gameState.players[opponent].hp = 0;
+    log(`${p} played ${card.type}${card.v?(' '+card.v):''}`);
+    updateUI();
+  } else if(action.act==='end'){
+    gameState.turn = other(gameState.turn);
+    // draw
+    const pl = gameState.players[gameState.turn];
+    if(pl.deck.length) pl.hand.push(pl.deck.shift());
+    updateUI();
+    log('ターン交代: ' + gameState.turn);
+  }
+  if(local) send({type:'action', action});
+}
+
+function updateUI(){
+  if(!gameState) return;
+  document.getElementById('myHp').textContent = gameState.players[localId].hp;
+  document.getElementById('opHp').textContent = gameState.players[other(localId)].hp;
+  document.getElementById('myDeck').textContent = gameState.players[localId].deck.length;
+  document.getElementById('opDeck').textContent = gameState.players[other(localId)].deck.length;
+  // render hands
+  const myHandDiv = document.getElementById('myHand'); myHandDiv.innerHTML='';
+  gameState.players[localId].hand.forEach((c,i)=>{
+    const b = document.createElement('button'); b.textContent = (c.type==='atk'?'ATK '+c.v:c.type);
+    b.onclick = ()=> applyAction({act:'play', player: localId, payload:{idx:i}}, true);
+    myHandDiv.appendChild(b);
+  });
+  const opDiv = document.getElementById('opVisible'); opDiv.innerHTML='';
+  // show nothing or last played card — here we show nothing for simplicity
+}
+
+// ユーティリティ
+function rint(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+// ゲーム開始ボタン（接続時に使用）
+document.getElementById('startGame').onclick = ()=>{
+  if(!dc || dc.readyState!=='open') return alert('まず接続してください');
+  // decide roles: A is room creator (Offerer)
+  localId = (myRole === 'A') ? 'A' : 'B';
+  applyAction({act:'new-game', player: localId, payload:{}}, true);
+};
+
+// ローカルリセット
+document.getElementById('reset').onclick = async ()=>{
+  try{ if(pc) pc.close(); }catch(e){}
+  pc = null; dc = null; roomRef = null; gameState = null; localId = null; myRole = null; roomIdCurrent = null;
+  roomInput.value = '';
+  setStatus('未接続'); myRoleEl.textContent = '—'; log('ローカルリセットしました');
+};
+
+// Helper: when DataChannel open, set up handler to receive actions
+function setupDataChannel(){
+  if(!dc) return;
+  dc.onopen = ()=> {
+    log('DataChannel open');
+    setStatus('接続済み');
+    // When connected, if you are B and game was started earlier remotely, remote can send game-state
+  };
+  dc.onmessage = ev => {
+    handleMessage(ev.data);
+  };
+  dc.onclose = ()=> {
+    log('DataChannel closed'); setStatus('切断');
   };
 }
 
-function rngDeck(){
-  // 単純な攻撃カード（1..6）と少し特殊（heal2, shield）
-  const arr = [];
-  for(let i=0;i<8;i++) arr.push({type:'atk',v: rint(1,6)});
-  arr.push({type:'atk',v:2}); arr.push({type:'atk',v:3});
-  // シャッフル
-  for(let i=arr.length-1;i>0;i--){ const j=rint(0,i); [arr[i],arr[j]]=[arr[j],arr[i]]; }
-  return arr;
-}
-
-// UI 更新
-function refreshUI(){
-  document.getElementById('myHp').textContent = state.players[myId].hp;
-  document.getElementById('opHp').textContent = state.players[otherId()].hp;
-  document.getElementById('myDeck').textContent = state.players[myId].deck.length;
-  document.getElementById('opDeck').textContent = state.players[otherId()].deck.length;
-  document.getElementById('myHandCount').textContent = state.players[myId].hand.length;
-  document.getElementById('opHandCount').textContent = state.players[otherId()].hand.length;
-  document.getElementById('turnInfo').textContent = (state.turn===myId)? 'あなたのターン' : '相手のターン';
-  // 手札表示（非公開） -> we show cards as clickable for player
-  const myHandDiv = document.getElementById('myHand'); myHandDiv.innerHTML='';
-  state.players[myId].hand.forEach((card,idx)=>{
-    const btn = document.createElement('button');
-    btn.className='card';
-    btn.textContent = card.type==='atk' ? 'ATK ' + card.v : card.type.toUpperCase();
-    btn.onclick = ()=> tryPlayCard(idx);
-    myHandDiv.appendChild(btn);
-  });
-  // 相手の公開カード（visible）
-  const opDiv = document.getElementById('opVisible'); opDiv.innerHTML='';
-  state.players[otherId()].visible.forEach((c)=> {
-    const el = document.createElement('div'); el.className='card'; el.textContent = c.type==='atk' ? 'ATK ' + c.v : c.type.toUpperCase();
-    opDiv.appendChild(el);
-  });
-}
-
-// helper
-function otherId(){ return myId==='A' ? 'B':'A'; }
-
-// send JSON over DataChannel (and also locally apply for host if needed)
-function sendMessage(obj){
-  const text = JSON.stringify(obj);
-  if(dc && dc.readyState==='open'){
-    dc.send(text);
-  } else {
-    log('Warning: DataChannel not open, cannot send');
+// Clean up DB entries when window closed (try)
+window.addEventListener('beforeunload', async () => {
+  if(roomIdCurrent && myRole==='A'){
+    try{ await remove(ref(db, 'rooms/' + roomIdCurrent)); }catch(e){/* ignore */ }
   }
-}
-
-// handle incoming messages
-function handleMessage(raw){
-  try {
-    const obj = JSON.parse(raw);
-    if(obj.type==='meta'){
-      log('META: '+obj.msg);
-    } else if(obj.type==='game-state'){
-      // full state replace (used at start)
-      state = obj.state;
-      refreshUI();
-      log('ゲーム状態を受信（全体同期）');
-    } else if(obj.type==='action'){
-      applyAction(obj.action, false); // false means remote action
-    }
-  } catch(e){ console.error(e); }
-}
-
-// applyAction applies one atomic action and (if local) broadcasts it
-function applyAction(action, local=true){
-  // action: {act:'play'|'end'|'draw'|'new-game'|'giveup', player: 'A'|'B', payload: {...}}
-  const p = action.player;
-  if(action.act==='new-game'){
-    state = buildEmptyState();
-    state.players.A.name = action.payload.names.A;
-    state.players.B.name = action.payload.names.B;
-    state.players.A.deck = rngDeck();
-    state.players.B.deck = rngDeck();
-    // initial draw 3
-    for(let i=0;i<3;i++){
-      drawFor('A'); drawFor('B');
-    }
-    state.started = true;
-    state.turn = 'A';
-    refreshUI();
-    log('新規ゲーム開始');
-  } else if(action.act==='play'){
-    if(state.turn !== action.player){ log('それは今できない操作'); return; }
-    const cardIndex = action.payload.idx;
-    const card = state.players[p].hand.splice(cardIndex,1)[0];
-    // 効果を適用 (ここは簡単: ATK => 相手にダメージ)
-    if(card.type==='atk'){
-      state.players[otherOf(p)].hp -= card.v;
-      if(state.players[otherOf(p)].hp < 0) state.players[otherOf(p)].hp = 0;
-      // 相手のvisibleに追加（相手に見える公開カード）
-      state.players[otherOf(p)].visible.push({type:card.type,v:card.v});
-      log(`${p} が ATK ${card.v} をプレイ -> ${otherOf(p)} に ${card.v} ダメージ`);
-    }
-    // 勝利判定
-    if(state.players[otherOf(p)].hp <= 0){
-      state.winner = p;
-      log(`勝者: ${p}`);
-    }
-    // local/UI更新
-    refreshUI();
-  } else if(action.act==='end'){
-    // ターン交代
-    state.turn = otherOf(state.turn);
-    // ターン開始時ドロー
-    drawFor(state.turn);
-    refreshUI();
-    log('ターン終了 -> ' + state.turn + ' のターン');
-  } else if(action.act==='draw'){
-    drawFor(p);
-    refreshUI();
-    log(`${p} がドロー`);
-  } else if(action.act==='giveup'){
-    state.winner = otherOf(action.player);
-    log(action.player + ' がギブアップ。勝者: ' + state.winner);
-  }
-  // broadcast if local action
-  if(local){
-    sendMessage({type:'action', action});
-  }
-}
-
-function otherOf(x){ return x==='A'?'B':'A'; }
-
-function drawFor(pid){
-  const pl = state.players[pid];
-  if(pl.deck.length === 0) return;
-  const card = pl.deck.shift();
-  if(pl.hand.length < 5) pl.hand.push(card); // 手札上限
-  // don't automatically reveal to opponent
-}
-
-// UI actions
-async function tryPlayCard(idx){
-  if(!state || !state.started) return alert('ゲームが始まっていません');
-  if(state.turn !== myId) return alert('自分のターンではありません');
-  // build action and apply locally (will be sent)
-  const action = { act:'play', player: myId, payload:{ idx } };
-  applyAction(action, true);
-}
-
-// buttons
-document.getElementById('newGame').onclick = ()=>{
-  if(!dc || dc.readyState!=='open') { alert('まず相手と接続してください'); return; }
-  // determine roles: offerer is A
-  myId = isOfferer ? 'A' : 'B';
-  const names = { A: document.getElementById('name').value || 'A', B: 'Remote' };
-  if(myId==='B'){ names.B = document.getElementById('name').value || 'B'; names.A = 'Remote'; }
-  // send new-game
-  const payload = { names };
-  const action = { act:'new-game', player: myId, payload };
-  applyAction({ act:'new-game', player: myId, payload }, true);
-  // Also broadcast state as full sync (conservative)
-  sendMessage({type:'game-state', state});
-};
-
-document.getElementById('endTurn').onclick = ()=>{
-  if(!state || !state.started) return;
-  if(state.turn !== myId) return alert('自分のターンではありません');
-  const action = { act:'end', player: myId, payload:{} };
-  applyAction(action, true);
-};
-
-document.getElementById('drawCard').onclick = ()=>{
-  const action = { act:'draw', player: myId, payload:{} };
-  applyAction(action, true);
-};
-
-document.getElementById('giveUp').onclick = ()=>{
-  if(!confirm('本当にギブアップしますか？')) return;
-  const action = { act:'giveup', player: myId, payload:{} };
-  applyAction(action, true);
-};
-
-document.getElementById('reset').onclick = ()=>{
-  state = buildEmptyState();
-  myId = null; isOfferer = false;
-  if(dc){ try{ dc.close(); }catch{} }
-  if(pc){ try{ pc.close(); }catch{} }
-  pc=dc=null;
-  sdpBox.value='';
-  setStatus('未接続');
-  log('ローカルリセット');
-  refreshUI();
-};
-
-// 初期
-state = buildEmptyState();
-refreshUI();
+});
 
 </script>
 </body>
