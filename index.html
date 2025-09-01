@@ -27,13 +27,14 @@
 <h3>ゲームログ</h3>
 <div id="log"></div>
 
-<!-- Firebase -->
+<!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-database-compat.js"></script>
+
 <script>
   // ===== Firebase 設定 =====
   const firebaseConfig = {
-　apiKey: "AIzaSyAkZj5sB_L1ww4nmXwn-L1iJVxQbKtN2Os",
+  apiKey: "AIzaSyAkZj5sB_L1ww4nmXwn-L1iJVxQbKtN2Os",
   authDomain: "tcg-project-c40c0.firebaseapp.com",
   projectId: "tcg-project-c40c0",
   storageBucket: "tcg-project-c40c0.firebasestorage.app",
@@ -44,25 +45,13 @@
   const app = firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
-  const gameId = "demoGame"; // 固定でもランダム生成でもOK
+  const gameId = "demoGame"; // 固定でもランダム生成可
   const gameRef = db.ref('games/' + gameId);
 
   let playerId = null;
   let gameData = null;
 
-  // ===== 初期データ作成 =====
-  function initGame(){
-    gameRef.set({
-      players: {
-        A: {hand:["火の精霊","水の精霊","森の精霊"], battlefield:[]},
-        B: {hand:["光の精霊","闇の精霊","風の精霊"], battlefield:[]}
-      },
-      turn: "A",
-      log: []
-    });
-  }
-
-  // ===== DB監視 =====
+  // ===== DB監視（リアルタイム更新） =====
   gameRef.on('value', snapshot => {
     gameData = snapshot.val();
     if(!gameData) return;
@@ -71,18 +60,32 @@
   });
 
   // ===== 参加ボタン =====
-  document.getElementById("joinBtn").onclick = () => {
+  document.getElementById("joinBtn").onclick = async () => {
     const pid = document.getElementById("playerId").value.trim().toUpperCase();
     if(pid !== "A" && pid !== "B") { alert("AかBを入力してください"); return; }
     playerId = pid;
-    if(!gameData) initGame();
-    render();
+
+    // 初期データがない場合は作成
+    const snapshot = await gameRef.get();
+    if(!snapshot.exists()){
+      await gameRef.set({
+        players: {
+          A: {hand:["火の精霊","水の精霊","森の精霊"], battlefield:[]},
+          B: {hand:["光の精霊","闇の精霊","風の精霊"], battlefield:[]}
+        },
+        turn: "A",
+        log: []
+      });
+    }
+
+    alert(`プレイヤー${playerId}として参加しました！`);
   };
 
   // ===== 描画 =====
   function render(){
     if(!playerId || !gameData) return;
 
+    // 手札描画
     const handDiv = document.getElementById("hand");
     handDiv.innerHTML = "";
     gameData.players[playerId].hand.forEach((card,i)=>{
@@ -93,6 +96,7 @@
       handDiv.appendChild(btn);
     });
 
+    // 場描画
     const bfDiv = document.getElementById("battlefield");
     bfDiv.innerHTML = "";
     Object.keys(gameData.players).forEach(pid=>{
@@ -103,6 +107,7 @@
       });
     });
 
+    // ゲームログ描画
     const logDiv = document.getElementById("log");
     logDiv.innerHTML = gameData.log.join("<br>");
   }
